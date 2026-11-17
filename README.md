@@ -1,8 +1,19 @@
+[![make.fun · btc-race-24h-20261117-0603](https://make.fun/badge/btc-race-24h-20261117-0603.svg)](https://make.fun/bounty/btc-race-24h-20261117-0603?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261117-0603)
+[![rank](https://make.fun/badge/btc-race-24h-20261117-0603/kyleweb3/btc-race-24h/rank.svg)](https://make.fun/bounty/btc-race-24h-20261117-0603/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261117-0603)
+[![reward](https://make.fun/badge/btc-race-24h-20261117-0603/kyleweb3/btc-race-24h/reward.svg)](https://make.fun/bounty/btc-race-24h-20261117-0603?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261117-0603)
+
 # btc-race-24h — dip-bounce BTC bot
 
 Entry for make.fun `btc-race-24h-20261117-0603`: a bot that trades Coinbase
 Wrapped BTC (cbBTC) against USDC, one 1-minute bar at a time, starting from
 $1,000 of paper money.
+
+Bounty page: https://make.fun/bounty/btc-race-24h-20261117-0603
+
+Run: `python3 main.py` — reads one JSON bar per minute on stdin, answers
+with buy/sell orders on stdout (protocol in `vendor/makefun_bars.py`).
+
+Referral code: `zz7nm6c9` (https://make.fun/r/zz7nm6c9)
 
 ## Strategy
 
@@ -12,6 +23,7 @@ Long only, one position, full size, few trades:
   is below EMA(240) — an oversold dip in a ranging market. Buy all cash.
 - **Exit** when RSI(60) rises above 65 (strength recovered), or the close
   falls 1% below the entry close (stop-loss). Sell everything.
+- **Cooldown**: after a stop-loss, no new entry for 120 bars.
 - **Fallback**: if no trade has happened by bar 1200 and the close is above
   EMA(240) with RSI(60) above 50 (a smooth grind-up day with no dip), buy
   once, so the entry always clears the race's minimum-1-trade bar.
