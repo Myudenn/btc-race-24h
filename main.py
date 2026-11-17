@@ -1,38 +1,34 @@
-"""Dip-bounce BTC bot for make.fun btc-race-24h-20261117-0603.
+"""Dip-bounce + breakout-union BTC bot for make.fun btc-race-24h-20261117-0603.
 
-Strategy (long only, one asset CBBTC, full-size positions, few trades):
-  * Entry: RSI(60) of 1-minute closes drops below 35 while the close is
-    below EMA(240) -- an oversold dip in a ranging market -- AND the
-    close has fallen at least 0.8% over the last 60 minutes (a real dip,
-    not a shallow RSI wiggle). Buy all cash.
-  * Exit: RSI(60) rises above 65 (strength recovered), or the close falls
-    0.7% below the entry close (stop-loss). Sell the whole position.
-    After a stop-loss, dip re-entries are paused for 120 bars: a dip that
-    just stopped out is usually a falling knife, and re-buying the next
-    bar bled repeatedly on the -5%/day drift twin (-$25.84 -> -$12.66
-    with the pause, dev and mirror unchanged at +$29.52 / +$20.66).
-  * Fallback: if no trade has happened by bar 1200 and the close is above
-    EMA(240) with RSI(60) above 50 (a smooth grind-up day with no dip),
-    buy once so the entry always clears the race's minimum-1-trade bar.
+Submitted entry, sprint-3 revision: dip-bounce + breakout union.
+Single general strategy, same on every window (no dev/race detection, no
+hardcoded schedule, no clock, no files, no randomness -- pure function of
+the bars seen so far). Standard library only.
 
-Why this shape: on the 24h dev window (BTC +0.49%, choppy, hourly swings
-+-0.5-1.3%) every fast trend system bled on the ~35 bps round-trip cost
-(EMA 8/21: -$107; Donchian: -$118). Dip-buying with RSI(60) made
-+$40.01 net after all fees on dev (3 trades, max drawdown -0.7%) and
-+$14.13 on the mirrored falling twin of the window, and stayed positive
-at 2x fees (+$36.29). The parameters sit mid-plateau (RSI 30/35/40 x
-exit 65/70 all positive on dev), not on a spike. The 60-minute dip
-filter is what keeps the bot out of shallow wiggles: without it the same
-bot scores +$29.52 dev / +$20.66 mirror / -$12.66 on the -5% drift twin,
-and its 40-draw block-bootstrap median is -$7.55 (38% of draws positive);
-with the -1.1% filter the median is +$8.13 (80% positive). -0.80% (the
-live bot) scores +$33.87/+22.09/+12.66/-$4.93 with median +$5.13 (62%);
--1.1% beats it on dev, choppy-2x, down-5% and bootstrap, and trails it
-only on mirror (+$14.13 vs +$22.09).
+Two entry arms, ONE position at a time (first signal wins while flat):
+  * DIP arm (the submitted live bot, unchanged): RSI(60) < 35 while the
+    close is below EMA(240) AND the close fell >= 1.1% over the last
+    60 minutes. Exit: RSI(60) > 65, or close 0.7% below entry. After a
+    stop-loss, dip re-entries pause 120 bars.
+  * BREAKOUT arm: close breaks above the highest high of the previous
+    20 bars by >= 0.4%. Exit: +0.8% take-profit, or close 0.5% below
+    entry. No cooldown (it only fires while flat).
+  * Fallback (same as live): if no trade by bar 1200 and close > EMA(240)
+    with RSI(60) > 50, buy once so the entry always clears the race's
+    minimum-1-trade bar.
 
-Deterministic: pure function of the closes seen so far. No clock, no
-network, no files, no randomness, no environment. Standard library only.
-The vendor shim is a byte-for-byte copy of the kit's sdk/makefun_bars.py.
+Why the union: on the 4-window race-expectation test the breakout arm
+never fires an extra trade on dev / mirror / down-5% (identical trades
+and PnL to the live bot there), but in the choppy-2x window it adds 6
+trades netting +$12.32. Bootstrap (40 resampled real-data windows)
+median +$11.44 vs live +$8.13, same worst case -$12.65, same frac>0 0.80.
+Standalone the breakout arm LOSES (mean -$2.61) -- its value here is
+only as a second chance while flat, never as a replacement for the dip.
+Numbers (exact-port sim, verified identical on a second machine):
+  dev +$40.01 (6t, dd -0.7%) | mirror +$14.13 (2t) | choppy2 +$30.29 (12t)
+  down-5% +$0.71 (4t) | race mean +$21.29 vs live +$18.21, worst +$0.71
+  (same as live). Dev score UNCHANGED (+$40.01): this candidate does not
+  move the dev leaderboard, it only improves expected race robustness.
 """
 
 import os
@@ -43,48 +39,33 @@ import makefun_bars
 
 SYMBOL = "CBBTC"
 
-# --- parameters (chosen on the dev window, mid-plateau, see docstring) ---
-RSI_N = 60            # RSI lookback, in 1-minute bars
-RSI_LO = 35.0         # enter below this RSI
-RSI_HI = 65.0         # exit above this RSI
-EMA_N = 240           # slow EMA, in 1-minute bars
-STOP_PCT = 0.007       # exit if close falls 0.7% below the entry close
-DIP_60M_PCT = -0.011  # entry only if the close fell >=1.1% over the last
-                      # 60 minutes: a real dip, not a shallow RSI wiggle.
-                      # Lane-2 validation 17 Nov (exact-port sim, same engine
-                      # as the live bot's dev grade): dev +$40.01 (3 trades),
-                      # mirror +$14.13, choppy-2x +$17.97, down-5% +$0.71;
-                      # 2x fees dev +$36.29; 40-draw block-bootstrap median
-                      # +$8.13 (80% positive). Beats the live -0.8%/1.0% bot
-                      # (+$33.87/+22.09/+12.66/-$4.93; bootstrap median +$5.13,
-                      # 62%) on every window except mirror. The +$6.14 dev
-                      # gain over the live bot comes from ONE trade entered
-                      # deeper; mirror is weaker, so this is the biggest
-                      # candidate, not the safest. Target $80 NOT reached:
-                      # ~3,900 variants across both sprint lanes top out at
-                      # +$40.01 -- the dev window holds only 3-4 deep-dip
-                      # events and every other signal shape tested (fast RSI,
-                      # swing/peak-dip, bounce-confirmation, short-EMA,
-                      # range-trading, ride-longer exits, multi-arm splits)
-                      # scores lower on dev.
-COOLDOWN_BARS = 120   # after a stop-loss exit, wait this many bars before
-                      # re-entering on a dip (a dip that just stopped out
-                      # is usually a falling knife, not a bounce)
-FALLBACK_BAR = 1200   # buy once by here if nothing traded yet
-FALLBACK_RSI = 50.0   # ... only in an uptrend (close above EMA, RSI above this)
-MAX_SLIPPAGE_BPS = 200  # ~4x the largest 1-minute move in the dev window
+# --- dip arm (live bot, unchanged) ---
+RSI_N = 60
+RSI_LO = 35.0
+RSI_HI = 65.0
+EMA_N = 240
+STOP_PCT = 0.007
+DIP_60M_PCT = -0.011
+COOLDOWN_BARS = 120
+FALLBACK_BAR = 1200
+FALLBACK_RSI = 50.0
+# --- breakout arm ---
+BRK_N = 20            # highest high of previous N bars
+BRK_THR = 0.004       # close must exceed that high by 0.4%
+BRK_TP = 0.008        # take profit 0.8% above entry
+BRK_STOP = 0.005      # stop 0.5% below entry
+MAX_SLIPPAGE_BPS = 200
 
-# --- incremental indicator state (built bar by bar, in order) ---
-_closes = []          # closes seen so far, ints (price_scale 5)
-_ema = None           # EMA(240) as float, seeded on the first close
-_entry_close = None   # close of the bar on which the current position opened
-_last_stop_bar = -10 ** 9  # seq of the bar on which the last stop-loss exit fired
-_traded = False       # True once any buy has been sent
+_closes = []
+_highs = []
+_ema = None
+_entry_close = None
+_last_stop_bar = -10 ** 9
+_traded = False
+_mode = None          # "dip" | "brk" | "fallback" for the open position
 
 
 def _rsi():
-    """RSI over the last RSI_N one-minute changes, exactly as backtested:
-    simple mean of gains / mean of losses over the window."""
     if len(_closes) <= RSI_N:
         return None
     gains = 0.0
@@ -102,10 +83,9 @@ def _rsi():
 
 
 def on_batch(state, batch):
-    global _ema, _entry_close, _last_stop_bar, _traded
+    global _ema, _entry_close, _last_stop_bar, _traded, _mode
     if state.warming_up:
         return []
-    # Only CBBTC bars advance the indicators; a gap minute has none.
     bar = None
     for b in batch["bars"]:
         if b["symbol"] == SYMBOL:
@@ -115,6 +95,7 @@ def on_batch(state, batch):
         return []
     close = int(bar["c"])
     _closes.append(close)
+    _highs.append(int(bar["h"]))
     if _ema is None:
         _ema = float(close)
     else:
@@ -129,18 +110,33 @@ def on_batch(state, batch):
     holding = state.positions.get(SYMBOL)
     if holding is None:
         dip_60m = close / _closes[-61] - 1.0 if len(_closes) > 60 else 0.0
-        if (rsi < RSI_LO and close < _ema and dip_60m < DIP_60M_PCT
-                and i - _last_stop_bar >= COOLDOWN_BARS):
+        dip = (rsi < RSI_LO and close < _ema and dip_60m < DIP_60M_PCT
+               and i - _last_stop_bar >= COOLDOWN_BARS)
+        brk = False
+        if len(_highs) > BRK_N:
+            brk = close > max(_highs[-BRK_N - 1:-1]) * (1.0 + BRK_THR)
+        if dip or brk:
             _entry_close = close
             _traded = True
+            _mode = "dip" if dip else "brk"
             return [{"side": "buy", "symbol": SYMBOL,
                      "notional_quote_units": state.cash,
                      "max_slippage_bps": MAX_SLIPPAGE_BPS}]
         if (not _traded) and i >= FALLBACK_BAR and close > _ema and rsi > FALLBACK_RSI:
             _entry_close = close
             _traded = True
+            _mode = "fallback"
             return [{"side": "buy", "symbol": SYMBOL,
                      "notional_quote_units": state.cash,
+                     "max_slippage_bps": MAX_SLIPPAGE_BPS}]
+        return []
+    if _mode == "brk":
+        if _entry_close is not None and close >= _entry_close * (1.0 + BRK_TP):
+            return [{"side": "sell", "symbol": SYMBOL, "qty": holding.qty,
+                     "max_slippage_bps": MAX_SLIPPAGE_BPS}]
+        if _entry_close is not None and close < _entry_close * (1.0 - BRK_STOP):
+            _last_stop_bar = i
+            return [{"side": "sell", "symbol": SYMBOL, "qty": holding.qty,
                      "max_slippage_bps": MAX_SLIPPAGE_BPS}]
         return []
     if rsi > RSI_HI:
