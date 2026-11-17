@@ -6,7 +6,7 @@ Strategy (long only, one asset CBBTC, full-size positions, few trades):
     close has fallen at least 0.8% over the last 60 minutes (a real dip,
     not a shallow RSI wiggle). Buy all cash.
   * Exit: RSI(60) rises above 65 (strength recovered), or the close falls
-    1% below the entry close (stop-loss). Sell the whole position.
+    0.7% below the entry close (stop-loss). Sell the whole position.
     After a stop-loss, dip re-entries are paused for 120 bars: a dip that
     just stopped out is usually a falling knife, and re-buying the next
     bar bled repeatedly on the -5%/day drift twin (-$25.84 -> -$12.66
@@ -18,14 +18,17 @@ Strategy (long only, one asset CBBTC, full-size positions, few trades):
 Why this shape: on the 24h dev window (BTC +0.49%, choppy, hourly swings
 +-0.5-1.3%) every fast trend system bled on the ~35 bps round-trip cost
 (EMA 8/21: -$107; Donchian: -$118). Dip-buying with RSI(60) made
-+$33.87 net after all fees on dev (6 trades, max drawdown -0.96%) and
-+$22.09 on the mirrored falling twin of the window, and stayed positive
-at 2x fees (+$30.16). The parameters sit mid-plateau (RSI 30/35/40 x
++$40.01 net after all fees on dev (3 trades, max drawdown -0.7%) and
++$14.13 on the mirrored falling twin of the window, and stayed positive
+at 2x fees (+$36.29). The parameters sit mid-plateau (RSI 30/35/40 x
 exit 65/70 all positive on dev), not on a spike. The 60-minute dip
 filter is what keeps the bot out of shallow wiggles: without it the same
 bot scores +$29.52 dev / +$20.66 mirror / -$12.66 on the -5% drift twin,
 and its 40-draw block-bootstrap median is -$7.55 (38% of draws positive);
-with the filter the median is +$5.13 (62% positive).
+with the -1.1% filter the median is +$8.13 (80% positive). -0.80% (the
+live bot) scores +$33.87/+22.09/+12.66/-$4.93 with median +$5.13 (62%);
+-1.1% beats it on dev, choppy-2x, down-5% and bootstrap, and trails it
+only on mirror (+$14.13 vs +$22.09).
 
 Deterministic: pure function of the closes seen so far. No clock, no
 network, no files, no randomness, no environment. Standard library only.
@@ -45,19 +48,25 @@ RSI_N = 60            # RSI lookback, in 1-minute bars
 RSI_LO = 35.0         # enter below this RSI
 RSI_HI = 65.0         # exit above this RSI
 EMA_N = 240           # slow EMA, in 1-minute bars
-STOP_PCT = 0.01       # exit if close falls 1% below the entry close
-DIP_60M_PCT = -0.008  # entry only if the close fell >=0.8% over the last
+STOP_PCT = 0.007       # exit if close falls 0.7% below the entry close
+DIP_60M_PCT = -0.011  # entry only if the close fell >=1.1% over the last
                       # 60 minutes: a real dip, not a shallow RSI wiggle.
-                      # Sprint 17 Nov 17:00-17:20 WIB (243-param grid +
-                      # 20 structural variants + combos, exact-port sim):
-                      # the filter beats the no-filter bot on dev
-                      # (+$33.87 vs +$29.52), mirror (+$22.09 vs +$20.66)
-                      # and the -5%/day drift twin (-$4.93 vs -$12.66),
-                      # ties choppy-2x (+$12.66), improves max drawdown on
-                      # every window, and flips the 40-draw block
-                      # bootstrap median from -$7.55 to +$5.13 (frac>0
-                      # 0.38 -> 0.62). -0.75% also passes; -0.85% loses a
-                      # winning mirror trade, so -0.80% is the pick.
+                      # Lane-2 validation 17 Nov (exact-port sim, same engine
+                      # as the live bot's dev grade): dev +$40.01 (3 trades),
+                      # mirror +$14.13, choppy-2x +$17.97, down-5% +$0.71;
+                      # 2x fees dev +$36.29; 40-draw block-bootstrap median
+                      # +$8.13 (80% positive). Beats the live -0.8%/1.0% bot
+                      # (+$33.87/+22.09/+12.66/-$4.93; bootstrap median +$5.13,
+                      # 62%) on every window except mirror. The +$6.14 dev
+                      # gain over the live bot comes from ONE trade entered
+                      # deeper; mirror is weaker, so this is the biggest
+                      # candidate, not the safest. Target $80 NOT reached:
+                      # ~3,900 variants across both sprint lanes top out at
+                      # +$40.01 -- the dev window holds only 3-4 deep-dip
+                      # events and every other signal shape tested (fast RSI,
+                      # swing/peak-dip, bounce-confirmation, short-EMA,
+                      # range-trading, ride-longer exits, multi-arm splits)
+                      # scores lower on dev.
 COOLDOWN_BARS = 120   # after a stop-loss exit, wait this many bars before
                       # re-entering on a dip (a dip that just stopped out
                       # is usually a falling knife, not a bounce)
